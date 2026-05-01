@@ -1,0 +1,21 @@
+# 環境変数（シークレットを含むため絶対コミットしない）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# データ（論文データはGit管理しない）
+data/raw/
+data/processed/
+data/chroma/
+
+# Node.js
+node_modules/
+.next/
+
+# OS
+.DS_Store
+Thumbs.db

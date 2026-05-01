@@ -1,0 +1,28 @@
+# RAG-for-Lab ハイパーパラメータ設定ファイル
+# モデルやRAGパラメータをここで一元管理する。
+# .envの同名変数が存在する場合は.envを優先する。
+
+llm:
+  model: "qwen3:8b"          # ollama pull で取得済みのモデル名
+  max_tokens: 1024
+  temperature: 0.1
+
+embedding:
+  model: "intfloat/multilingual-e5-large"
+
+rag:
+  top_k: 5
+  similarity_threshold: 0.5
+  history_window: 5
+
+chunking:
+  chunk_size: 512
+  chunk_overlap: 64
+  min_chunk_length: 50        # 品質フィルタ: 50文字未満を破棄
+
+ocr:
+  confidence_threshold: 0.8   # 低品質OCRをレビューキューへ
+
+pipeline:
+  max_retry_attempts: 3
+  base_delay_seconds: 1.0
