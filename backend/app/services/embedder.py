@@ -1,27 +1,23 @@
-# [ROLE] 埋め込みモデルのシングルトン管理（Phase 2 では起動ウォームアップ用のスタブ。Phase 4 で SentenceTransformer 実装に差し替える）
+# [ROLE] 埋め込みモデルのシングルトン管理・クエリ／パッセージの埋め込み生成
 # [DEPS] core/config.py
 # [CALLED_BY] services/pipeline.py, services/rag.py, main.py
 
+from sentence_transformers import SentenceTransformer
 
-class _StubEmbedder:
-    """Phase 4 で SentenceTransformer に置き換えるまでの仮実装。"""
-
-    def encode(self, texts):
-        if isinstance(texts, str):
-            return [0.0] * 1024
-        return [[0.0] * 1024 for _ in texts]
+from app.core.config import settings
 
 
-_model = None
+_model: SentenceTransformer | None = None
 
 
-def get_embedder():
+def get_embedder() -> SentenceTransformer:
+    """埋め込みモデルのシングルトン取得。初回呼び出し時にロードする。"""
     global _model
     if _model is None:
-        _model = _StubEmbedder()
+        _model = SentenceTransformer(settings.embedding_model)
     return _model
 
 
-def embed_query(query: str) -> list:
-    """Phase 4 で実装する。Phase 2 ではスタブ。"""
-    return get_embedder().encode("query: " + query)
+def embed_query(query: str) -> list[float]:
+    """検索時は 'query: ' プレフィックスを付与する（multilingual-e5-large の仕様）。"""
+    return get_embedder().encode("query: " + query).tolist()
