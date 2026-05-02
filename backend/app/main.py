@@ -7,12 +7,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.models.db import Base, engine
+from app.models.db import Base, apply_lightweight_migrations, engine
 from app.routers import chat, conversations, documents
 from app.services.embedder import get_embedder
 
 
 Base.metadata.create_all(bind=engine)
+apply_lightweight_migrations()
 
 
 @asynccontextmanager

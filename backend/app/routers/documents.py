@@ -1,4 +1,4 @@
-# [ROLE] 文書アップロード・一覧・削除・インデックス状況確認・OCR詳細・元画像配信のAPIエンドポイント
+# [ROLE] 文書アップロード・一覧・削除・インデックス状況確認・OCR詳細／補正テキスト／再インデックス・元画像配信のAPIエンドポイント
 # [DEPS] models/db.py, services/pipeline.py, core/config.py
 # [CALLED_BY] main.py
 
@@ -77,6 +77,19 @@ class OcrDetailOut(BaseModel):
     avg_confidence: float
     low_conf_count: int
     blocks: List[OcrBlockOut]
+
+
+class OcrTextOut(BaseModel):
+    text: str
+    is_corrected: bool
+
+
+class OcrTextIn(BaseModel):
+    text: str
+
+
+class ReindexAccepted(BaseModel):
+    status: str
 
 
 @router.get("/documents", response_model=List[DocumentOut])
@@ -164,6 +177,89 @@ def get_document_ocr(doc_id: UUID, db: Session = Depends(get_db)):
         low_conf_count=ocr.low_conf_count,
         blocks=ocr.blocks or [],
     )
+
+
+@router.get("/documents/{doc_id}/ocr/text", response_model=OcrTextOut)
+def get_document_ocr_text(doc_id: UUID, db: Session = Depends(get_db)):
+    """補正テキストがあれば優先して返す。なければ blocks の text を改行で結合して返す。"""
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.source_type != "ocr":
+        raise HTTPException(status_code=404, detail="OCR text not available for this document type")
+
+    ocr = db.query(OcrResult).filter(OcrResult.document_id == doc_id).first()
+    if not ocr:
+        raise HTTPException(status_code=404, detail="OCR result not found")
+
+    if ocr.corrected_text:
+        return OcrTextOut(text=ocr.corrected_text, is_corrected=True)
+
+    blocks = ocr.blocks or []
+    text = "\n".join(b.get("text", "") for b in blocks)
+    return OcrTextOut(text=text, is_corrected=False)
+
+
+@router.put("/documents/{doc_id}/ocr/text")
+def put_document_ocr_text(
+    doc_id: UUID, body: OcrTextIn, db: Session = Depends(get_db)
+):
+    """補正テキストを保存する。空文字を渡せば NULL に戻し未補正状態とする。"""
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.source_type != "ocr":
+        raise HTTPException(status_code=404, detail="OCR text not available for this document type")
+
+    ocr = db.query(OcrResult).filter(OcrResult.document_id == doc_id).first()
+    if not ocr:
+        raise HTTPException(status_code=404, detail="OCR result not found")
+
+    ocr.corrected_text = body.text if body.text else None
+    db.commit()
+    return {"status": "saved"}
+
+
+@router.post(
+    "/documents/{doc_id}/reindex",
+    response_model=ReindexAccepted,
+    status_code=202,
+)
+async def reindex_document(
+    doc_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """ChromaDB の既存チャンクを削除した後、status=pending に戻して再インデックスを実行する。"""
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Step 1: ChromaDB から既存チャンクを削除（最大2回リトライ・指数バックオフ）
+    for attempt in range(2):
+        try:
+            client = chromadb.PersistentClient(path=settings.chroma_path)
+            collection = client.get_or_create_collection(settings.chroma_collection)
+            results = collection.get(where={"doc_id": str(doc_id)})
+            if results["ids"]:
+                collection.delete(ids=results["ids"])
+            break
+        except Exception as e:
+            if attempt == 1:
+                print(f"ChromaDB delete failed after 2 attempts: {e}")
+            else:
+                await asyncio.sleep(1.0)
+
+    # Step 2: status を pending に戻す（チャンク数・エラーもリセット）
+    doc.status = "pending"
+    doc.chunk_count = 0
+    doc.error_message = None
+    db.commit()
+
+    # Step 3: バックグラウンドで再インデックス
+    background_tasks.add_task(run_indexing_pipeline, str(doc.id))
+
+    return ReindexAccepted(status="reindexing")
 
 
 @router.post("/documents", response_model=DocumentUploadAccepted, status_code=202)

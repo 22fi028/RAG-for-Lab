@@ -351,11 +351,28 @@ def _indexing_sync(doc_id: str) -> int:
         title = doc.title or ""
         author = doc.author or ""
         year = doc.year or 0
+
+        # OCR 文書の補正テキスト（再インデックス時はこちらを優先）
+        corrected_text: Optional[str] = None
+        if source_type == "ocr":
+            existing_ocr = (
+                db.query(OcrResult).filter(OcrResult.document_id == doc_id).first()
+            )
+            if existing_ocr and existing_ocr.corrected_text:
+                corrected_text = existing_ocr.corrected_text
     finally:
         db.close()
 
     print(f"[pipeline] extracting file: {file_path}")
-    markdown_text, ocr_result = _extract_to_markdown(source_type, file_path)
+
+    if source_type == "ocr" and corrected_text:
+        # 既存 OCR の補正テキストをそのまま markdown として使用する。
+        # blocks は既に保存済みなので OCR は再実行しない。
+        markdown_text = corrected_text
+        ocr_result = None
+        print(f"[pipeline] using corrected_text from ocr_results ({len(markdown_text)} chars)")
+    else:
+        markdown_text, ocr_result = _extract_to_markdown(source_type, file_path)
     print(f"[pipeline] markdown length: {len(markdown_text)} chars")
 
     if ocr_result is not None:

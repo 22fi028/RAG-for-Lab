@@ -14,6 +14,7 @@ from sqlalchemy import (
     CheckConstraint,
     create_engine,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -93,7 +94,17 @@ class OcrResult(Base):
     low_conf_count = Column(Integer, nullable=False)
     # blocks: [{"text": "...", "confidence": 0.95, "bbox": [x1, y1, x2, y2]}, ...]
     blocks = Column(JSONB, nullable=False)
+    # NULL なら未補正。値が入っていれば再インデックス時に blocks より優先する。
+    corrected_text = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+def apply_lightweight_migrations() -> None:
+    """create_all は新規カラムを追加しないため、既存テーブルへの ADD COLUMN を冪等に実行する。"""
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE ocr_results ADD COLUMN IF NOT EXISTS corrected_text TEXT")
+        )
 
 
 def get_db():
