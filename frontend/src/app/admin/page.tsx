@@ -10,8 +10,13 @@ import DocumentTable from "@/components/admin/DocumentTable";
 import { useDocuments } from "@/hooks/useDocuments";
 
 export default function AdminPage() {
-  const { documents, uploading, uploadDocument, deleteDocument } =
-    useDocuments();
+  const {
+    documents,
+    uploading,
+    uploadDocument,
+    deleteDocument,
+    reindexDocument,
+  } = useDocuments();
 
   return (
     <div className="h-screen flex flex-col">
@@ -32,6 +37,7 @@ export default function AdminPage() {
             <DocumentTable
               documents={documents}
               onDelete={deleteDocument}
+              onReindex={reindexDocument}
             />
           </section>
         </div>

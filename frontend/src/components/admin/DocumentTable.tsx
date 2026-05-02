@@ -1,4 +1,4 @@
-// [ROLE] 文書一覧テーブル(タイトル/種別/チャンク数/信頼度バッジ/ステータスバッジ/登録日/削除ボタン)・信頼度クリックでOCR詳細モーダルを開く
+// [ROLE] 文書一覧テーブル(タイトル/種別/チャンク数/信頼度バッジ/ステータスバッジ/登録日/再インデックス・削除ボタン)・信頼度クリックでOCR詳細モーダルを開く
 // [DEPS] hooks/useDocuments.ts, lib/types.ts, components/admin/OcrDetailModal.tsx
 // [CALLED_BY] app/admin/page.tsx
 
@@ -11,6 +11,7 @@ import OcrDetailModal from "./OcrDetailModal";
 type Props = {
   documents: DocumentRecord[];
   onDelete: (id: string) => void;
+  onReindex: (id: string) => Promise<void>;
 };
 
 const STATUS_LABEL: Record<DocumentStatus, string> = {
@@ -97,8 +98,21 @@ function formatDate(iso: string): string {
   }
 }
 
-export default function DocumentTable({ documents, onDelete }: Props) {
+export default function DocumentTable({
+  documents,
+  onDelete,
+  onReindex,
+}: Props) {
   const [ocrModalDoc, setOcrModalDoc] = useState<DocumentRecord | null>(null);
+
+  const handleReindex = async (doc: DocumentRecord) => {
+    try {
+      await onReindex(doc.id);
+    } catch (e) {
+      console.error("reindexDocument failed:", e);
+      alert("再インデックスの開始に失敗しました。時間をおいて再度お試しください。");
+    }
+  };
 
   if (documents.length === 0) {
     return (
@@ -158,17 +172,39 @@ export default function DocumentTable({ documents, onDelete }: Props) {
                 {formatDate(d.created_at)}
               </td>
               <td className="px-3 py-2 text-right">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (confirm(`「${d.title || "(無題)"}」を削除しますか?`)) {
-                      onDelete(d.id);
-                    }
-                  }}
-                  className="text-xs text-red-600 hover:text-red-800"
-                >
-                  削除
-                </button>
+                <div className="flex items-center justify-end gap-3">
+                  {d.source_type === "ocr" && d.is_corrected && (
+                    d.status === "pending" || d.status === "indexing" ? (
+                      <button
+                        type="button"
+                        disabled
+                        className="text-xs text-gray-400 cursor-not-allowed"
+                      >
+                        ⏳ 処理中...
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleReindex(d)}
+                        className="text-xs text-blue-600 hover:text-blue-800"
+                      >
+                        🔄 再インデックス
+                      </button>
+                    )
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm(`「${d.title || "(無題)"}」を削除しますか?`)) {
+                        onDelete(d.id);
+                      }
+                    }}
+                    disabled={d.status === "indexing"}
+                    className="text-xs text-red-600 hover:text-red-800 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:text-gray-400"
+                  >
+                    削除
+                  </button>
+                </div>
               </td>
             </tr>
           ))}

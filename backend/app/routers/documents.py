@@ -49,6 +49,7 @@ class DocumentOut(BaseModel):
     status: str
     error_message: Optional[str]
     avg_confidence: Optional[float]
+    is_corrected: bool
     created_at: datetime
 
     class Config:
@@ -95,7 +96,7 @@ class ReindexAccepted(BaseModel):
 @router.get("/documents", response_model=List[DocumentOut])
 def list_documents(db: Session = Depends(get_db)):
     rows = (
-        db.query(Document, OcrResult.avg_confidence)
+        db.query(Document, OcrResult.avg_confidence, OcrResult.corrected_text)
         .outerjoin(OcrResult, OcrResult.document_id == Document.id)
         .order_by(Document.created_at.desc())
         .all()
@@ -112,9 +113,10 @@ def list_documents(db: Session = Depends(get_db)):
             status=doc.status,
             error_message=doc.error_message,
             avg_confidence=avg_confidence,
+            is_corrected=corrected_text is not None,
             created_at=doc.created_at,
         )
-        for doc, avg_confidence in rows
+        for doc, avg_confidence, corrected_text in rows
     ]
 
 

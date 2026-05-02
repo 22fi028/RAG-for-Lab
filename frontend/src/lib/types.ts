@@ -43,6 +43,8 @@ export type DocumentRecord = {
   created_at: string;
   // OCR文書のみ。一覧APIには含まれず /documents/{id}/ocr から後追いで取得する。
   avg_confidence?: number;
+  // OCR文書のみ。corrected_text が保存されているかどうか。
+  is_corrected?: boolean;
 };
 
 export const API_BASE_URL =

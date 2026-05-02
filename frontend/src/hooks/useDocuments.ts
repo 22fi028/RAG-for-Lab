@@ -125,6 +125,23 @@ export function useDocuments() {
     }
   }, []);
 
+  const reindexDocument = useCallback(async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE_URL}/api/documents/${id}/reindex`, {
+      method: "POST",
+    });
+    if (!res.ok && res.status !== 202) {
+      throw new Error(`reindex failed (status ${res.status})`);
+    }
+    // status を pending に戻すと既存ポーリング (useEffect) が自動で再開する
+    setDocuments((prev) =>
+      prev.map((d) =>
+        d.id === id
+          ? { ...d, status: "pending", chunk_count: 0, error_message: null }
+          : d
+      )
+    );
+  }, []);
+
   useEffect(() => {
     fetchDocuments();
   }, [fetchDocuments]);
@@ -136,5 +153,6 @@ export function useDocuments() {
     refetch: fetchDocuments,
     uploadDocument,
     deleteDocument,
+    reindexDocument,
   };
 }
