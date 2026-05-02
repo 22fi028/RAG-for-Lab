@@ -1,0 +1,62 @@
+services:
+  backend:
+    build: ./backend
+    container_name: lab-rag-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+      - ./config.yaml:/app/config.yaml
+    env_file:
+      - .env
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - lab-rag-net
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: lab-rag-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - lab-rag-net
+    restart: unless-stopped
+
+  db:
+    image: postgres:16
+    container_name: lab-rag-db
+    ports:
+      - "5432:5432"
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U labrag"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lab-rag-net
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  lab-rag-net:
+    driver: bridge
