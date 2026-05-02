@@ -1,5 +1,6 @@
 # 環境変数（シークレットを含むため絶対コミットしない）
 .env
+backend/config.yaml
 
 # Python
 __pycache__/

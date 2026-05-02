@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.db import Document, get_db
+from app.services.pipeline import run_indexing_pipeline
 
 
 router = APIRouter()
@@ -116,7 +117,7 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
 
-    # Phase 3 で BackgroundTasks に run_indexing_pipeline を登録する。
+    background_tasks.add_task(run_indexing_pipeline, str(doc.id))
 
     return DocumentUploadAccepted(id=doc.id, status=doc.status)
 
