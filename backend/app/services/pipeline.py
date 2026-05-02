@@ -34,6 +34,25 @@ _CHAPTER_RE = re.compile(r"^第[\d０-９一二三四五六七八九十百]+章[
 _SECTION_RE = re.compile(r"^(\d+\.\d+)[ \t　]+(.+)$")
 _SUBSECTION_RE = re.compile(r"^(\d+\.\d+\.\d+)[ \t　]+(.+)$")
 
+# OCRブロックを読み順に並べる際の行グルーピング幅（px）。同一行内のyminの揺れを吸収する。
+OCR_ROW_BIN_SIZE = 10
+
+
+def sort_blocks(blocks: list[dict]) -> list[dict]:
+    """
+    OCRブロックを読み順（上→下・左→右）にソートする。
+    bbox は extract_ocr で [xmin, ymin, xmax, ymax] フラット形式に正規化済み。
+    ymin を OCR_ROW_BIN_SIZE で丸めて行グループを作り、同一行内は xmin でソートする。
+    """
+    def sort_key(block: dict) -> tuple[float, float]:
+        bbox = block.get("bbox") or [0.0, 0.0, 0.0, 0.0]
+        xmin = float(bbox[0]) if len(bbox) >= 1 else 0.0
+        ymin = float(bbox[1]) if len(bbox) >= 2 else 0.0
+        row_bin = (ymin // OCR_ROW_BIN_SIZE) * OCR_ROW_BIN_SIZE
+        return (row_bin, xmin)
+
+    return sorted(blocks, key=sort_key)
+
 
 _ocr = None
 
@@ -209,8 +228,9 @@ def to_markdown_ocr(ocr_result: dict) -> str:
     （低信頼度ブロックは ocr_results テーブルには残すが索引対象からは外す）
     """
     threshold = settings.ocr_confidence_threshold
+    sorted_blocks = sort_blocks(ocr_result["blocks"])
     text = "\n".join(
-        b["text"] for b in ocr_result["blocks"] if b["confidence"] >= threshold
+        b["text"] for b in sorted_blocks if b["confidence"] >= threshold
     )
     if not text:
         return "<!-- page: 1 -->"

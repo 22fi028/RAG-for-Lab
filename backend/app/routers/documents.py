@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.db import Document, OcrResult, get_db
-from app.services.pipeline import run_indexing_pipeline
+from app.services.pipeline import run_indexing_pipeline, sort_blocks
 
 
 router = APIRouter()
@@ -197,7 +197,7 @@ def get_document_ocr_text(doc_id: UUID, db: Session = Depends(get_db)):
     if ocr.corrected_text:
         return OcrTextOut(text=ocr.corrected_text, is_corrected=True)
 
-    blocks = ocr.blocks or []
+    blocks = sort_blocks(ocr.blocks or [])
     text = "\n".join(b.get("text", "") for b in blocks)
     return OcrTextOut(text=text, is_corrected=False)
 
