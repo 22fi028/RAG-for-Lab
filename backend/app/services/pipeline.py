@@ -18,7 +18,7 @@ from pptx import Presentation
 
 from app.core.config import settings
 from app.core.retry import with_retry
-from app.models.db import Document, SessionLocal
+from app.models.db import Document, OcrResult, SessionLocal
 from app.services.embedder import get_embedder
 
 
@@ -106,9 +106,10 @@ def extract_docx(file_path: str) -> list[dict]:
 
 def extract_ocr(file_path: str) -> dict:
     """
-    画像 OCR。テキストブロックごとに信頼度スコアを取得し、
-    settings.ocr_confidence_threshold 未満のブロックは除外する。
-    平均信頼度（avg_confidence）は全ブロック（除外前）の平均で算出する。
+    画像 OCR。テキストブロックごとに信頼度スコアとバウンディングボックスを取得する。
+    blocks には全ブロック（低信頼度含む）を保持し、
+    インデックス化時の除外は to_markdown_ocr 側で行う。
+    avg_confidence は全ブロックの平均、low_conf_count は閾値未満ブロック数。
     """
     ocr = get_ocr()
     result = ocr.ocr(file_path, cls=True)
@@ -121,15 +122,21 @@ def extract_ocr(file_path: str) -> dict:
 
     for det in page_result:
         try:
-            _, (text, score) = det
+            bbox_pts, (text, score) = det
         except (TypeError, ValueError):
             continue
         score_f = float(score)
         scores.append(score_f)
         if score_f < threshold:
             low_conf_count += 1
-            continue
-        blocks.append({"page": 1, "text": text, "confidence": score_f})
+        # 4頂点 [[x1,y1],[x2,y1],[x2,y2],[x1,y2]] を [xmin, ymin, xmax, ymax] に変換
+        try:
+            xs = [float(pt[0]) for pt in bbox_pts]
+            ys = [float(pt[1]) for pt in bbox_pts]
+            bbox = [min(xs), min(ys), max(xs), max(ys)]
+        except (TypeError, ValueError, IndexError):
+            bbox = [0.0, 0.0, 0.0, 0.0]
+        blocks.append({"text": text, "confidence": score_f, "bbox": bbox})
 
     avg_confidence = (sum(scores) / len(scores)) if scores else 0.0
     return {
@@ -197,8 +204,14 @@ def to_markdown_docx(pages: list[dict]) -> str:
 
 
 def to_markdown_ocr(ocr_result: dict) -> str:
-    """OCR 抽出結果を Markdown 化。"""
-    text = "\n".join(b["text"] for b in ocr_result["blocks"])
+    """
+    OCR 抽出結果を Markdown 化。インデックス化対象は信頼度 >= 閾値のブロックのみ。
+    （低信頼度ブロックは ocr_results テーブルには残すが索引対象からは外す）
+    """
+    threshold = settings.ocr_confidence_threshold
+    text = "\n".join(
+        b["text"] for b in ocr_result["blocks"] if b["confidence"] >= threshold
+    )
     if not text:
         return "<!-- page: 1 -->"
     return _structure_text(text) + "\n<!-- page: 1 -->"
@@ -280,16 +293,47 @@ def _build_metadata(
     }
 
 
-def _extract_to_markdown(source_type: str, file_path: str) -> str:
+def _extract_to_markdown(source_type: str, file_path: str) -> tuple[str, Optional[dict]]:
+    """
+    戻り値: (markdown_text, ocr_result)
+    ocr_result は source_type が 'ocr' の場合のみ dict、それ以外は None。
+    """
     if source_type == "pdf":
-        return to_markdown_pdf(extract_pdf(file_path))
+        return to_markdown_pdf(extract_pdf(file_path)), None
     if source_type == "pptx":
-        return to_markdown_pptx(extract_pptx(file_path))
+        return to_markdown_pptx(extract_pptx(file_path)), None
     if source_type == "word":
-        return to_markdown_docx(extract_docx(file_path))
+        return to_markdown_docx(extract_docx(file_path)), None
     if source_type == "ocr":
-        return to_markdown_ocr(extract_ocr(file_path))
+        ocr_result = extract_ocr(file_path)
+        return to_markdown_ocr(ocr_result), ocr_result
     raise ValueError(f"Unsupported source_type: {source_type}")
+
+
+def _save_ocr_result(doc_id: str, ocr_result: dict) -> None:
+    """OCR の信頼度・バウンディングボックスを ocr_results テーブルへ upsert する。
+    再実行時の unique 衝突を避けるため、既存レコードがあれば更新する。"""
+    db = SessionLocal()
+    try:
+        existing = (
+            db.query(OcrResult).filter(OcrResult.document_id == doc_id).first()
+        )
+        if existing:
+            existing.avg_confidence = ocr_result["avg_confidence"]
+            existing.low_conf_count = ocr_result["low_conf_count"]
+            existing.blocks = ocr_result["blocks"]
+        else:
+            db.add(
+                OcrResult(
+                    document_id=doc_id,
+                    avg_confidence=ocr_result["avg_confidence"],
+                    low_conf_count=ocr_result["low_conf_count"],
+                    blocks=ocr_result["blocks"],
+                )
+            )
+        db.commit()
+    finally:
+        db.close()
 
 
 # ==================== メインフロー ====================
@@ -311,8 +355,16 @@ def _indexing_sync(doc_id: str) -> int:
         db.close()
 
     print(f"[pipeline] extracting file: {file_path}")
-    markdown_text = _extract_to_markdown(source_type, file_path)
+    markdown_text, ocr_result = _extract_to_markdown(source_type, file_path)
     print(f"[pipeline] markdown length: {len(markdown_text)} chars")
+
+    if ocr_result is not None:
+        print(
+            f"[pipeline] ocr blocks: {len(ocr_result['blocks'])}, "
+            f"avg_confidence: {ocr_result['avg_confidence']:.3f}, "
+            f"low_conf_count: {ocr_result['low_conf_count']}"
+        )
+        _save_ocr_result(doc_id, ocr_result)
 
     print("[pipeline] chunking...")
     chunks = chunk_markdown(markdown_text)

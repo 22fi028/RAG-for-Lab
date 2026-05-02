@@ -1,6 +1,6 @@
-# [ROLE] SQLAlchemy モデル定義（conversations / messages / documents テーブル）と DB セッション管理
+# [ROLE] SQLAlchemy モデル定義（conversations / messages / documents / ocr_results テーブル）と DB セッション管理
 # [DEPS] core/config.py
-# [CALLED_BY] main.py, routers/chat.py, routers/conversations.py, routers/documents.py
+# [CALLED_BY] main.py, routers/chat.py, routers/conversations.py, routers/documents.py, services/pipeline.py
 
 import uuid
 from sqlalchemy import (
@@ -8,6 +8,7 @@ from sqlalchemy import (
     String,
     Text,
     Integer,
+    Float,
     DateTime,
     ForeignKey,
     CheckConstraint,
@@ -74,6 +75,24 @@ class Document(Base):
     chunk_count = Column(Integer, nullable=False, default=0)
     status = Column(Text, nullable=False, default="pending")
     error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class OcrResult(Base):
+    __tablename__ = "ocr_results"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    avg_confidence = Column(Float, nullable=False)
+    low_conf_count = Column(Integer, nullable=False)
+    # blocks: [{"text": "...", "confidence": 0.95, "bbox": [x1, y1, x2, y2]}, ...]
+    blocks = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

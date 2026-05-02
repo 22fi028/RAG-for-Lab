@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.db import Document, get_db
+from app.models.db import Document, OcrResult, get_db
 from app.services.pipeline import run_indexing_pipeline
 
 
@@ -65,6 +65,18 @@ class DocumentUploadAccepted(BaseModel):
     status: str
 
 
+class OcrBlockOut(BaseModel):
+    text: str
+    confidence: float
+    bbox: List[float]
+
+
+class OcrDetailOut(BaseModel):
+    avg_confidence: float
+    low_conf_count: int
+    blocks: List[OcrBlockOut]
+
+
 @router.get("/documents", response_model=List[DocumentOut])
 def list_documents(db: Session = Depends(get_db)):
     return db.query(Document).order_by(Document.created_at.desc()).all()
@@ -80,6 +92,25 @@ def get_document_status(doc_id: UUID, db: Session = Depends(get_db)):
         status=doc.status,
         chunk_count=doc.chunk_count,
         error_message=doc.error_message,
+    )
+
+
+@router.get("/documents/{doc_id}/ocr", response_model=OcrDetailOut)
+def get_document_ocr(doc_id: UUID, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.source_type != "ocr":
+        raise HTTPException(status_code=404, detail="OCR detail not available for this document type")
+
+    ocr = db.query(OcrResult).filter(OcrResult.document_id == doc_id).first()
+    if not ocr:
+        raise HTTPException(status_code=404, detail="OCR result not found")
+
+    return OcrDetailOut(
+        avg_confidence=ocr.avg_confidence,
+        low_conf_count=ocr.low_conf_count,
+        blocks=ocr.blocks or [],
     )
 
 
