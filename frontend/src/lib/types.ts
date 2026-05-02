@@ -41,6 +41,8 @@ export type DocumentRecord = {
   status: DocumentStatus;
   error_message: string | null;
   created_at: string;
+  // OCR文書のみ。一覧APIには含まれず /documents/{id}/ocr から後追いで取得する。
+  avg_confidence?: number;
 };
 
 export const API_BASE_URL =
