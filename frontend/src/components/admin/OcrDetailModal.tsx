@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_BASE_URL } from "@/lib/types";
+import OcrTextEditorModal from "./OcrTextEditorModal";
 
 type OcrBlock = {
   text: string;
@@ -62,6 +63,7 @@ export default function OcrDetailModal({ docId, docTitle, onClose }: Props) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -76,14 +78,15 @@ export default function OcrDetailModal({ docId, docTitle, onClose }: Props) {
     };
   }, []);
 
-  // ESC キーで閉じる
+  // ESC キーで閉じる（編集モーダル表示中は編集モーダル側に処理を譲る）
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (showEditor) return;
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, showEditor]);
 
   // OCRデータ取得 + 画像ロード
   useEffect(() => {
@@ -202,12 +205,15 @@ export default function OcrDetailModal({ docId, docTitle, onClose }: Props) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
+    <>
+      <div
+        className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+        onClick={onClose}
+        role="dialog"
+        aria-modal="true"
+        // 編集モーダル表示中は詳細ビューアを一時非表示にする（unmount しないことで状態を保持）
+        style={{ display: showEditor ? "none" : "flex" }}
+      >
       <div
         className="bg-white rounded-lg shadow-xl max-w-6xl w-full h-[90vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
@@ -217,14 +223,23 @@ export default function OcrDetailModal({ docId, docTitle, onClose }: Props) {
           <h2 className="font-semibold truncate pr-4">
             OCR詳細: <span className="text-gray-700">{docTitle}</span>
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-sm text-gray-600 hover:text-gray-900 px-2 py-1"
-            aria-label="閉じる"
-          >
-            ✕ 閉じる
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowEditor(true)}
+              className="text-sm text-blue-700 hover:text-blue-900 px-2 py-1 border border-blue-200 rounded hover:bg-blue-50"
+            >
+              ✏️ テキストを編集
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-sm text-gray-600 hover:text-gray-900 px-2 py-1"
+              aria-label="閉じる"
+            >
+              ✕ 閉じる
+            </button>
+          </div>
         </div>
 
         {/* ボディ: 左=画像+BB, 右=サマリー+ブロック一覧 */}
@@ -325,6 +340,16 @@ export default function OcrDetailModal({ docId, docTitle, onClose }: Props) {
           </aside>
         </div>
       </div>
-    </div>
+      </div>
+
+      {showEditor && (
+        <OcrTextEditorModal
+          docId={docId}
+          docTitle={docTitle}
+          onClose={() => setShowEditor(false)}
+          onSaved={() => setShowEditor(false)}
+        />
+      )}
+    </>
   );
 }
