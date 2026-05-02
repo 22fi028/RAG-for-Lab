@@ -48,6 +48,7 @@ class DocumentOut(BaseModel):
     chunk_count: int
     status: str
     error_message: Optional[str]
+    avg_confidence: Optional[float]
     created_at: datetime
 
     class Config:
@@ -80,7 +81,28 @@ class OcrDetailOut(BaseModel):
 
 @router.get("/documents", response_model=List[DocumentOut])
 def list_documents(db: Session = Depends(get_db)):
-    return db.query(Document).order_by(Document.created_at.desc()).all()
+    rows = (
+        db.query(Document, OcrResult.avg_confidence)
+        .outerjoin(OcrResult, OcrResult.document_id == Document.id)
+        .order_by(Document.created_at.desc())
+        .all()
+    )
+    return [
+        DocumentOut(
+            id=doc.id,
+            title=doc.title,
+            author=doc.author,
+            year=doc.year,
+            source_type=doc.source_type,
+            file_path=doc.file_path,
+            chunk_count=doc.chunk_count,
+            status=doc.status,
+            error_message=doc.error_message,
+            avg_confidence=avg_confidence,
+            created_at=doc.created_at,
+        )
+        for doc, avg_confidence in rows
+    ]
 
 
 @router.get("/documents/{doc_id}/status", response_model=DocumentStatusOut)
