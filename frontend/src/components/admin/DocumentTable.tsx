@@ -1,10 +1,12 @@
-// [ROLE] 文書一覧テーブル(タイトル/種別/チャンク数/信頼度バッジ/ステータスバッジ/登録日/削除ボタン)
-// [DEPS] hooks/useDocuments.ts, lib/types.ts
+// [ROLE] 文書一覧テーブル(タイトル/種別/チャンク数/信頼度バッジ/ステータスバッジ/登録日/削除ボタン)・信頼度クリックでOCR詳細モーダルを開く
+// [DEPS] hooks/useDocuments.ts, lib/types.ts, components/admin/OcrDetailModal.tsx
 // [CALLED_BY] app/admin/page.tsx
 
 "use client";
 
+import { useState } from "react";
 import { DocumentRecord, DocumentStatus } from "@/lib/types";
+import OcrDetailModal from "./OcrDetailModal";
 
 type Props = {
   documents: DocumentRecord[];
@@ -54,14 +56,30 @@ function confidenceBadge(score: number) {
   );
 }
 
-function confidenceCell(d: DocumentRecord) {
-  if (d.source_type !== "ocr") {
+function ConfidenceCell({
+  doc,
+  onOpen,
+}: {
+  doc: DocumentRecord;
+  onOpen: (doc: DocumentRecord) => void;
+}) {
+  if (doc.source_type !== "ocr") {
     return <span className="text-gray-400 text-xs">-</span>;
   }
-  if (typeof d.avg_confidence !== "number") {
+  if (typeof doc.avg_confidence !== "number") {
     return <span className="text-gray-400 text-xs">-</span>;
   }
-  return confidenceBadge(d.avg_confidence);
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(doc)}
+      className="cursor-pointer hover:opacity-80 transition-opacity"
+      title="OCR詳細を表示"
+      aria-label="OCR詳細を開く"
+    >
+      {confidenceBadge(doc.avg_confidence)}
+    </button>
+  );
 }
 
 function formatDate(iso: string): string {
@@ -80,6 +98,8 @@ function formatDate(iso: string): string {
 }
 
 export default function DocumentTable({ documents, onDelete }: Props) {
+  const [ocrModalDoc, setOcrModalDoc] = useState<DocumentRecord | null>(null);
+
   if (documents.length === 0) {
     return (
       <p className="text-sm text-gray-500 py-8 text-center">
@@ -89,6 +109,7 @@ export default function DocumentTable({ documents, onDelete }: Props) {
   }
 
   return (
+    <>
     <div className="overflow-x-auto border border-gray-200 rounded-lg bg-white">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-xs text-gray-600 border-b border-gray-200">
@@ -121,7 +142,9 @@ export default function DocumentTable({ documents, onDelete }: Props) {
               <td className="px-3 py-2 text-right text-xs">
                 {d.chunk_count}
               </td>
-              <td className="px-3 py-2">{confidenceCell(d)}</td>
+              <td className="px-3 py-2">
+                <ConfidenceCell doc={d} onOpen={setOcrModalDoc} />
+              </td>
               <td className="px-3 py-2">
                 <span
                   className={`px-2 py-0.5 rounded-full text-[11px] ${statusBadgeClass(
@@ -152,5 +175,13 @@ export default function DocumentTable({ documents, onDelete }: Props) {
         </tbody>
       </table>
     </div>
+    {ocrModalDoc && (
+      <OcrDetailModal
+        docId={ocrModalDoc.id}
+        docTitle={ocrModalDoc.title || "(無題)"}
+        onClose={() => setOcrModalDoc(null)}
+      />
+    )}
+    </>
   );
 }

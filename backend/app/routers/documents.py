@@ -1,4 +1,4 @@
-# [ROLE] 文書アップロード・一覧・削除・インデックス状況確認のAPIエンドポイント
+# [ROLE] 文書アップロード・一覧・削除・インデックス状況確認・OCR詳細・元画像配信のAPIエンドポイント
 # [DEPS] models/db.py, services/pipeline.py, core/config.py
 # [CALLED_BY] main.py
 
@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 import chromadb
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -93,6 +94,35 @@ def get_document_status(doc_id: UUID, db: Session = Depends(get_db)):
         chunk_count=doc.chunk_count,
         error_message=doc.error_message,
     )
+
+
+@router.get("/documents/{doc_id}/image")
+def get_document_image(doc_id: UUID, db: Session = Depends(get_db)):
+    """OCR文書の元画像を返す。OCR以外・ファイル不存在は 404。"""
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.source_type != "ocr":
+        raise HTTPException(status_code=404, detail="Image not available for this document type")
+    if not doc.file_path:
+        raise HTTPException(status_code=404, detail="File path not recorded")
+
+    # パストラバーサル防止: 解決後も UPLOAD_ROOT 配下であることを確認する
+    file_path = Path(doc.file_path).resolve()
+    try:
+        file_path.relative_to(UPLOAD_ROOT.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail="File not found")
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = file_path.suffix.lower()
+    media_type = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+    }.get(ext, "application/octet-stream")
+    return FileResponse(str(file_path), media_type=media_type, filename=file_path.name)
 
 
 @router.get("/documents/{doc_id}/ocr", response_model=OcrDetailOut)
