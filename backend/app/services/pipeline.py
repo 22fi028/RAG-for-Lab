@@ -35,7 +35,7 @@ _SECTION_RE = re.compile(r"^(\d+\.\d+)[ \t　]+(.+)$")
 _SUBSECTION_RE = re.compile(r"^(\d+\.\d+\.\d+)[ \t　]+(.+)$")
 
 # OCRブロックを読み順に並べる際の行グルーピング幅（px）。同一行内のyminの揺れを吸収する。
-OCR_ROW_BIN_SIZE = 10
+OCR_ROW_BIN_SIZE = 20
 
 
 def sort_blocks(blocks: list[dict]) -> list[dict]:
