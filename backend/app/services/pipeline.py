@@ -34,24 +34,39 @@ _CHAPTER_RE = re.compile(r"^第[\d０-９一二三四五六七八九十百]+章[
 _SECTION_RE = re.compile(r"^(\d+\.\d+)[ \t　]+(.+)$")
 _SUBSECTION_RE = re.compile(r"^(\d+\.\d+\.\d+)[ \t　]+(.+)$")
 
-# OCRブロックを読み順に並べる際の行グルーピング幅（px）。同一行内のyminの揺れを吸収する。
-OCR_ROW_BIN_SIZE = 20
+OCR_ROW_GAP_THRESHOLD = 15  # これ以上yminが離れたら別行とみなす
 
 
 def sort_blocks(blocks: list[dict]) -> list[dict]:
     """
     OCRブロックを読み順（上→下・左→右）にソートする。
-    bbox は extract_ocr で [xmin, ymin, xmax, ymax] フラット形式に正規化済み。
-    ymin を OCR_ROW_BIN_SIZE で丸めて行グループを作り、同一行内は xmin でソートする。
+    隣接ブロック間のymin差がOCR_ROW_GAP_THRESHOLD以上なら別行と判定する。
+    同一行内はxminの昇順でソートする。
     """
-    def sort_key(block: dict) -> tuple[float, float]:
-        bbox = block.get("bbox") or [0.0, 0.0, 0.0, 0.0]
-        xmin = float(bbox[0]) if len(bbox) >= 1 else 0.0
-        ymin = float(bbox[1]) if len(bbox) >= 2 else 0.0
-        row_bin = (ymin // OCR_ROW_BIN_SIZE) * OCR_ROW_BIN_SIZE
-        return (row_bin, xmin)
+    if not blocks:
+        return blocks
 
-    return sorted(blocks, key=sort_key)
+    # まずyminで昇順ソート
+    sorted_by_y = sorted(blocks, key=lambda b: b["bbox"][1])
+
+    # 差分クラスタリングで行グループを割り当て
+    row_id = 0
+    prev_ymin = sorted_by_y[0]["bbox"][1]
+    for block in sorted_by_y:
+        ymin = block["bbox"][1]
+        if ymin - prev_ymin > OCR_ROW_GAP_THRESHOLD:
+            row_id += 1
+        block["_row_id"] = row_id
+        prev_ymin = ymin
+
+    # (行ID, xmin) でソート
+    result = sorted(sorted_by_y, key=lambda b: (b["_row_id"], b["bbox"][0]))
+
+    # 一時キーを削除
+    for block in result:
+        block.pop("_row_id", None)
+
+    return result
 
 
 _ocr = None
