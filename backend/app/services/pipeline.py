@@ -243,13 +243,34 @@ def to_markdown_ocr(ocr_result: dict) -> str:
     （低信頼度ブロックは ocr_results テーブルには残すが索引対象からは外す）
     """
     threshold = settings.ocr_confidence_threshold
-    sorted_blocks = sort_blocks(ocr_result["blocks"])
-    text = "\n".join(
-        b["text"] for b in sorted_blocks if b["confidence"] >= threshold
-    )
-    if not text:
+    blocks = [b for b in ocr_result["blocks"] if b["confidence"] >= threshold]
+    blocks = sort_blocks(blocks)
+
+    # 差分クラスタリングで行グループを割り当て
+    row_id = 0
+    prev_ymin = blocks[0]["bbox"][1] if blocks else 0
+    for block in blocks:
+        ymin = block["bbox"][1]
+        if ymin - prev_ymin > OCR_ROW_GAP_THRESHOLD:
+            row_id += 1
+        block["_row_id"] = row_id
+        prev_ymin = ymin
+
+    # 同一行はスペース結合・行間は改行
+    from itertools import groupby
+    lines = []
+    for _, group in groupby(blocks, key=lambda b: b["_row_id"]):
+        line = " ".join(b.get("text", "") for b in group)
+        lines.append(line)
+
+    # 一時キーを削除
+    for block in blocks:
+        block.pop("_row_id", None)
+
+    markdown_text = "\n".join(lines)
+    if not markdown_text:
         return "<!-- page: 1 -->"
-    return _structure_text(text) + "\n<!-- page: 1 -->"
+    return _structure_text(markdown_text) + "\n<!-- page: 1 -->"
 
 
 # ==================== Step 4: ハイブリッドチャンキング ====================
