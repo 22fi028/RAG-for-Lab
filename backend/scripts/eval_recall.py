@@ -1,4 +1,4 @@
-# [ROLE] Recall@5 評価CLI: eval_set.jsonl の各質問に対しTop-5検索を行い、expected_keywords が全て含まれるチャンクの存在率を出力
+# [ROLE] Recall@5 評価CLI: eval_set.jsonl の各質問に対しハイブリッド検索Top-5を行い、expected_keywords が全て含まれるチャンクの存在率を出力
 # [DEPS] core/config.py, services/embedder.py, services/rag.py
 # [CALLED_BY] (CLI) docker compose exec backend python scripts/eval_recall.py [--debug] [--expand]
 
@@ -8,13 +8,10 @@ import json
 import sys
 from pathlib import Path
 
-import chromadb
-
 sys.path.insert(0, "/app")
 
-from app.core.config import settings
 from app.services.embedder import embed_query
-from app.services.rag import expand_query
+from app.services.rag import expand_query, hybrid_search
 
 
 EVAL_SET_PATH = Path(__file__).parent / "eval_set.jsonl"
@@ -41,14 +38,22 @@ def excerpt(text: str, length: int = EXCERPT_LEN) -> str:
     return text[:length] + "..."
 
 
+def _strip_spaces(text: str) -> str:
+    """半角・全角スペースを除去する。OCR/抽出で挿入される余計な空白の影響を避ける。"""
+    return text.replace(" ", "").replace("　", "")
+
+
 def chunk_contains_all_keywords(chunk_text: str, keywords: list[str]) -> bool:
-    return all(kw in chunk_text for kw in keywords)
+    normalized_chunk = _strip_spaces(chunk_text)
+    return all(_strip_spaces(kw) in normalized_chunk for kw in keywords)
+
+
+async def _retrieve(query: str) -> list[dict]:
+    embedding = embed_query(query)
+    return await hybrid_search(query, embedding)
 
 
 def evaluate(items: list[dict], debug: bool = False, expand: bool = False) -> tuple[int, int]:
-    client = chromadb.PersistentClient(path=settings.chroma_path)
-    collection = client.get_or_create_collection(settings.chroma_collection)
-
     hits = 0
     total = 0
 
@@ -64,14 +69,9 @@ def evaluate(items: list[dict], debug: bool = False, expand: bool = False) -> tu
             query = asyncio.run(expand_query(query))
             print(f"[eval]   expanded: {query}")
 
-        embedding = embed_query(query)
-        results = collection.query(
-            query_embeddings=[embedding],
-            n_results=TOP_K,
-            include=["documents", "distances"],
-        )
-        documents = (results.get("documents") or [[]])[0]
-        distances = (results.get("distances") or [[]])[0]
+        chunks = asyncio.run(_retrieve(query))
+        documents = [c.get("content", "") for c in chunks][:TOP_K]
+        scores = [c.get("score", 0.0) for c in chunks][:TOP_K]
 
         if not documents:
             print("[eval]   → MISS (no results)")
@@ -85,16 +85,13 @@ def evaluate(items: list[dict], debug: bool = False, expand: bool = False) -> tu
 
         if hit_index >= 0:
             hits += 1
-            score = 1 - distances[hit_index]
-            print(f'[eval]   → HIT  (chunk: "{excerpt(documents[hit_index])}") score={score:.2f}')
+            print(f'[eval]   → HIT  (chunk: "{excerpt(documents[hit_index])}") rrf_score={scores[hit_index]:.4f}')
         else:
-            score = 1 - distances[0]
-            print(f'[eval]   → MISS (top chunk: "{excerpt(documents[0])}") score={score:.2f}')
+            print(f'[eval]   → MISS (top chunk: "{excerpt(documents[0])}") rrf_score={scores[0]:.4f}')
             if debug:
                 print("[eval]   Top-5 chunks:")
-                for i, (doc, dist) in enumerate(zip(documents, distances), start=1):
-                    chunk_score = 1 - dist
-                    print(f'[eval]     #{i} score={chunk_score:.2f}: "{excerpt(doc, DEBUG_EXCERPT_LEN)}"')
+                for i, (doc, sc) in enumerate(zip(documents, scores), start=1):
+                    print(f'[eval]     #{i} rrf_score={sc:.4f}: "{excerpt(doc, DEBUG_EXCERPT_LEN)}"')
 
     return hits, total
 

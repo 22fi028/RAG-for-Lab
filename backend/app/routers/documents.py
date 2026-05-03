@@ -1,5 +1,5 @@
 # [ROLE] 文書アップロード・一覧・削除・インデックス状況確認・OCR詳細／補正テキスト／再インデックス・元画像配信のAPIエンドポイント
-# [DEPS] models/db.py, services/pipeline.py, core/config.py
+# [DEPS] models/db.py, services/pipeline.py, services/rag.py, core/config.py
 # [CALLED_BY] main.py
 
 import os
@@ -19,6 +19,15 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.db import Document, OcrResult, get_db
 from app.services.pipeline import run_indexing_pipeline, sort_blocks
+from app.services.rag import invalidate_bm25_cache
+
+
+async def _run_pipeline_and_invalidate(doc_id: str) -> None:
+    """インデックス化パイプライン完了後にBM25キャッシュを破棄する。"""
+    try:
+        await run_indexing_pipeline(doc_id)
+    finally:
+        invalidate_bm25_cache()
 
 
 router = APIRouter()
@@ -282,7 +291,7 @@ async def reindex_document(
     db.commit()
 
     # Step 3: バックグラウンドで再インデックス
-    background_tasks.add_task(run_indexing_pipeline, str(doc.id))
+    background_tasks.add_task(_run_pipeline_and_invalidate, str(doc.id))
 
     return ReindexAccepted(status="reindexing")
 
@@ -321,7 +330,7 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
 
-    background_tasks.add_task(run_indexing_pipeline, str(doc.id))
+    background_tasks.add_task(_run_pipeline_and_invalidate, str(doc.id))
 
     return DocumentUploadAccepted(id=doc.id, status=doc.status)
 
@@ -354,3 +363,6 @@ async def delete_document(doc_id: UUID, db: Session = Depends(get_db)):
     # Step 3: PostgreSQL レコードを削除
     db.delete(doc)
     db.commit()
+
+    # Step 4: BM25 キャッシュを破棄（次回検索時にリビルド）
+    invalidate_bm25_cache()
