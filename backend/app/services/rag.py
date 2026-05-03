@@ -1,4 +1,4 @@
-# [ROLE] ChromaDB検索・プロンプト組み立て・OllamaへのLLMストリーミング呼び出し
+# [ROLE] クエリ拡張・ChromaDB検索・プロンプト組み立て・OllamaへのLLMストリーミング呼び出し
 # [DEPS] core/config.py, core/retry.py, services/embedder.py
 # [CALLED_BY] routers/chat.py
 
@@ -20,6 +20,43 @@ SYSTEM_PROMPT = (
     "回答の末尾に【参照】を付ける必要はありません。根拠の表示はシステムが自動で行います。\n"
     "/no_think"
 )
+
+
+async def expand_query(query: str) -> str:
+    """
+    Ollamaにクエリ拡張を依頼し "{元のクエリ} {拡張キーワード}" を返す。
+    失敗時は元のクエリをそのまま返し、検索を止めない。
+    """
+    prompt = (
+        "/no_think\n"
+        "次の質問に関連する検索キーワードを5語から8語、スペース区切りで列挙してください。\n"
+        "キーワードのみ出力し、説明文・句読点・記号は不要です。\n"
+        f"質問: {query}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.ollama_base_url}/api/generate",
+                json={
+                    "model": settings.ollama_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "think": False,
+                    "options": {
+                        "temperature": 0.1,
+                        "num_predict": 60,
+                    },
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            keywords = (data.get("response") or "").strip()
+            if not keywords:
+                return query
+            return f"{query} {keywords}"
+    except Exception as e:
+        print(f"[rag] query expansion failed, falling back to original query: {e}")
+        return query
 
 
 async def search_chroma(query_embedding: list[float]) -> list[dict]:

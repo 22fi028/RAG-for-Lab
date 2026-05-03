@@ -16,6 +16,7 @@ from app.services.embedder import embed_query
 from app.services.rag import (
     build_prompt,
     build_sources_from_chunks,
+    expand_query,
     search_chroma,
     stream_llm,
 )
@@ -85,7 +86,9 @@ async def generate_stream(req: ChatRequest):
         finally:
             db.close()
 
-        query_embedding = embed_query(req.question)
+        expanded = await expand_query(req.question)
+        print(f"[rag] expanded query: {expanded}")
+        query_embedding = embed_query(expanded)
         chunks = await search_chroma(query_embedding)
         prompt = build_prompt(req.question, chunks, history)
 
