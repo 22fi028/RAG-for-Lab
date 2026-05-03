@@ -1,0 +1,3 @@
+{"question": "サンプリングレートは何か", "expected_keywords": ["サンプリング"], "source_doc_title": "サンプル"}
+{"question": "実験環境はどこか", "expected_keywords": ["実験"], "source_doc_title": "サンプル"}
+{"question": "手法の概要は何か", "expected_keywords": ["手法"], "source_doc_title": "サンプル"}
