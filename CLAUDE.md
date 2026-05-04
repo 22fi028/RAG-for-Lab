@@ -30,3 +30,4 @@ Phase X: [作業中のフェーズを都度更新]
 | RAG-for-Lab_dev-log-vol1.md | 実データ検証・問題B完了 |
 | RAG-for-Lab_dev-log-vol2.md | OCR読み順修正・mainマージ |
 | RAG-for-Lab_dev-log-vol3.md | Recall@5測定基盤・クエリ拡張失敗 |
+| RAG-for-Lab_dev-log-vol4.md | ハイブリッド検索でRecall@5を0.33→0.92まで改善 |
