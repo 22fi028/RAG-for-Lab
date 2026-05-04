@@ -1,5 +1,5 @@
-# [ROLE] クエリ拡張・ハイブリッド検索（BM25 + ベクトル + RRF統合）・プロンプト組み立て・OllamaへのLLMストリーミング呼び出し
-# [DEPS] core/config.py, core/retry.py, services/embedder.py
+# [ROLE] BM25向けクエリ拡張・ハイブリッド検索（BM25 + ベクトル + RRF統合）・プロンプト組み立て・OllamaへのLLMストリーミング呼び出し
+# [DEPS] core/config.py, services/embedder.py
 # [CALLED_BY] routers/chat.py, routers/documents.py（invalidate_bm25_cacheのみ）, scripts/eval_recall.py
 
 import asyncio
@@ -23,19 +23,23 @@ SYSTEM_PROMPT = (
 )
 
 
-async def expand_query(query: str) -> str:
+async def expand_query_for_bm25(query: str) -> str:
     """
-    Ollamaにクエリ拡張を依頼し "{元のクエリ} {拡張キーワード}" を返す。
-    失敗時は元のクエリをそのまま返し、検索を止めない。
+    BM25検索専用のクエリ拡張。
+    LLMに「答えが書かれたチャンクに含まれていそうな固有語」を生成させ、
+    "{元のquery} {拡張語}" を返す。ベクトル検索のクエリには使用しないこと。
+    失敗・タイムアウト時は元のqueryをそのまま返す（フォールバック）。
     """
     prompt = (
         "/no_think\n"
-        "次の質問に関連する検索キーワードを5語から8語、スペース区切りで列挙してください。\n"
-        "キーワードのみ出力し、説明文・句読点・記号は不要です。\n"
+        "以下の質問に答えている文書のチャンクに含まれていそうな、\n"
+        "具体的な単語・数値・英語表記・略語を5語以内で列挙してください。\n"
+        "汎用語（「定義」「とは」「方法」など）は除外してください。\n"
+        "スペース区切りで出力し、説明文は不要です。\n\n"
         f"質問: {query}"
     )
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 f"{settings.ollama_base_url}/api/generate",
                 json={
@@ -51,12 +55,24 @@ async def expand_query(query: str) -> str:
             )
             response.raise_for_status()
             data = response.json()
-            keywords = (data.get("response") or "").strip()
-            if not keywords:
+            raw = (data.get("response") or "").strip()
+            if not raw:
                 return query
-            return f"{query} {keywords}"
+            # Qwen3 はしばしば説明文や同語反復を返すため、5語以内・重複なしに整形する
+            first_line = raw.splitlines()[0]
+            seen: set[str] = set()
+            tokens: list[str] = []
+            for tok in first_line.split():
+                if tok not in seen:
+                    seen.add(tok)
+                    tokens.append(tok)
+                if len(tokens) >= 5:
+                    break
+            if not tokens:
+                return query
+            return f"{query} {' '.join(tokens)}"
     except Exception as e:
-        print(f"[rag] query expansion failed, falling back to original query: {e}")
+        print(f"[rag] BM25 query expansion failed, falling back to original query: {e}")
         return query
 
 
@@ -104,11 +120,17 @@ _bm25_corpus: list[tuple[str, str, dict]] | None = None  # [(chunk_id, content, 
 
 def _tokenize(text: str) -> list[str]:
     """
-    半角スペース分割。日本語の分かち書きは行わないが、
-    固有名詞・数値・英単語はスペース分割でも十分機能する（問題Aの核心）。
-    n-gramを併用すると共通語が支配的になりノイズが増えるため敢えて採用しない。
+    文字N-gram（2-gram + 3-gram）でトークン化する。日本語のように分かち書きが
+    難しい言語でも BM25 が機能するよう、文字単位の連続部分文字列を語彙として扱う。
+    set() で重複排除してから list 化する。空文字や空白のみは空リストを返す。
     """
-    return text.split()
+    if not text or not text.strip():
+        return []
+    tokens: set[str] = set()
+    for n in (2, 3):
+        for i in range(len(text) - n + 1):
+            tokens.add(text[i:i + n])
+    return list(tokens)
 
 
 def build_bm25_index() -> None:
@@ -229,10 +251,18 @@ def reciprocal_rank_fusion(
     return [chunk_data[k_] for k_ in sorted_keys[:top_k]]
 
 
-async def hybrid_search(query: str, query_embedding: list[float]) -> list[dict]:
-    """ベクトル検索（ChromaDB）とBM25検索を実行し RRF で統合する。"""
+async def hybrid_search(
+    query: str,
+    query_embedding: list[float],
+    expand_bm25: bool = True,
+) -> list[dict]:
+    """
+    ベクトル検索（ChromaDB）とBM25検索を実行し RRF で統合する。
+    expand_bm25=True のとき BM25 クエリのみ LLM 拡張する（ベクトル側は元の query を維持）。
+    """
     vector_results = await search_chroma(query_embedding)
-    bm25_results = search_bm25(query, top_k=settings.rag_top_k * 2)
+    bm25_query = await expand_query_for_bm25(query) if expand_bm25 else query
+    bm25_results = search_bm25(bm25_query, top_k=settings.rag_top_k * 2)
     return reciprocal_rank_fusion(vector_results, bm25_results)
 
 
