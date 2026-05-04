@@ -242,20 +242,9 @@ def get_document_ocr_text(doc_id: UUID, db: Session = Depends(get_db)):
     if ocr.corrected_text:
         return OcrTextOut(text=ocr.corrected_text, is_corrected=True)
 
-    blocks = sort_blocks(ocr.blocks or [])
+    blocks = sort_blocks(ocr.blocks or [])  # _row_id 付きで返る
 
-    # _row_id を付与して同一行をグループ化
-    from app.services.pipeline import OCR_ROW_GAP_THRESHOLD
-    row_id = 0
-    prev_ymin = blocks[0]["bbox"][1] if blocks else 0
-    for block in blocks:
-        ymin = block["bbox"][1]
-        if ymin - prev_ymin > OCR_ROW_GAP_THRESHOLD:
-            row_id += 1
-        block["_row_id"] = row_id
-        prev_ymin = ymin
-
-    # 同一行はスペース結合・行間は改行
+    # 同一行 (_row_id) ごとにスペース結合・行間は改行
     from itertools import groupby
     lines = []
     for _, group in groupby(blocks, key=lambda b: b["_row_id"]):
