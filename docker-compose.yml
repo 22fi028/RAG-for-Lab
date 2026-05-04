@@ -11,6 +11,10 @@ services:
     env_file:
       - .env
     environment:
+      # Windows/Mac: host.docker.internal でホストに接続できる
+      # Linux の場合は extra_hosts を追加する:
+      #   extra_hosts:
+      #     - "host.docker.internal:host-gateway"
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
     depends_on:
       db:
