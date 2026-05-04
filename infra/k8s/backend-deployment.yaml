@@ -1,0 +1,55 @@
+# NOTE: 動作未検証。学内サーバー移行時の参考構成です。
+# docker-compose.yml をベースに作成しています。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: lab-rag
+  labels:
+    app: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: lab-rag-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://labrag:labrag@db-service:5432/labrag"
+            # Ollama はホストPC側で起動する想定。クラスタ外のホストに接続する。
+            # 環境に応じて kubernetes.docker.internal などに置き換えること。
+            - name: OLLAMA_BASE_URL
+              value: "http://host.docker.internal:11434"
+            - name: CHROMA_PATH
+              value: "/data/chroma"
+            - name: CHROMA_COLLECTION
+              value: "lab_rag"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: lab-rag
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000

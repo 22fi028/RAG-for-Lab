@@ -1,0 +1,52 @@
+# NOTE: 動作未検証。学内サーバー移行時の参考構成です。
+# docker-compose.yml をベースに作成しています。
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  namespace: lab-rag
+  labels:
+    app: db
+spec:
+  serviceName: db-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "labrag"
+            - name: POSTGRES_PASSWORD
+              value: "labrag"
+            - name: POSTGRES_DB
+              value: "labrag"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: db-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-service
+  namespace: lab-rag
+spec:
+  type: ClusterIP
+  selector:
+    app: db
+  ports:
+    - port: 5432
+      targetPort: 5432
