@@ -1,4 +1,4 @@
-# [ROLE] 文書アップロード・一覧・削除・インデックス状況確認・OCR詳細／補正テキスト／再インデックス・元画像配信のAPIエンドポイント
+# [ROLE] 文書アップロード・一覧・削除・インデックス状況確認・OCR詳細／補正テキスト／再インデックス・元画像配信・チャンク抜粋取得のAPIエンドポイント
 # [DEPS] models/db.py, services/pipeline.py, services/rag.py, core/config.py
 # [CALLED_BY] main.py
 
@@ -102,6 +102,10 @@ class ReindexAccepted(BaseModel):
     status: str
 
 
+class ChunkExcerptOut(BaseModel):
+    content: str
+
+
 @router.get("/documents", response_model=List[DocumentOut])
 def list_documents(db: Session = Depends(get_db)):
     rows = (
@@ -127,6 +131,38 @@ def list_documents(db: Session = Depends(get_db)):
         )
         for doc, avg_confidence, corrected_text in rows
     ]
+
+
+@router.get("/documents/chunk-excerpt", response_model=ChunkExcerptOut)
+def get_chunk_excerpt(title: str, chapter: str = "", page: int = 0):
+    """
+    title / chapter / page をキーに ChromaDB を検索し、最初にマッチしたチャンクの
+    先頭 settings.rag_excerpt_max_length 文字を返す。マッチなしは content="" を返す（404にしない）。
+    chapter / page は ChromaDB の where 句では絞らず Python 側でフィルタする
+    （ChromaDB の where は AND 条件の組み合わせで複雑になりやすいため）。
+    """
+    try:
+        client = chromadb.PersistentClient(path=settings.chroma_path)
+        collection = client.get_or_create_collection(settings.chroma_collection)
+        results = collection.get(
+            where={"title": title},
+            include=["documents", "metadatas"],
+        )
+    except Exception as e:
+        print(f"[chunk-excerpt] ChromaDB get failed: {e}")
+        return ChunkExcerptOut(content="")
+
+    documents = results.get("documents") or []
+    metadatas = results.get("metadatas") or []
+    for doc, meta in zip(documents, metadatas):
+        meta = meta or {}
+        if chapter and (meta.get("chapter") or "") != chapter:
+            continue
+        if page and int(meta.get("page_num") or 0) != page:
+            continue
+        text = doc or ""
+        return ChunkExcerptOut(content=text[: settings.rag_excerpt_max_length])
+    return ChunkExcerptOut(content="")
 
 
 @router.get("/documents/{doc_id}/status", response_model=DocumentStatusOut)
