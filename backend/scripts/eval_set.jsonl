@@ -1,6 +1,6 @@
 {"question": "サンプリングレートは何か", "expected_keywords": ["96kHz"], "source_doc_title": "卒論フルペーパー"}
 {"question": "3Dメッシュ生成に使用したツールは何か", "expected_keywords": ["Easy Mocap"], "source_doc_title": "卒論フルペーパー"}
-{"question": "回帰属性に使用した評価指標は何か", "expected_keywords": ["MAE", "R²"], "source_doc_title": "卒論フルペーパー"}
+{"question": "回帰属性に使用した評価指標は何か", "expected_keywords": ["MAE", "R2"], "source_doc_title": "卒論フルペーパー"}
 {"question": "検証地区はどこか", "expected_keywords": ["高蔵寺地区"], "source_doc_title": "遠隔アシストを用いた自動運転支援の有効性検証"}
 {"question": "検証期間と回数は何か", "expected_keywords": ["2024年12月"], "source_doc_title": "遠隔アシストを用いた自動運転支援の有効性検証"}
 {"question": "活用した車はどこのか", "expected_keywords": ["名古屋大学"], "source_doc_title": "遠隔アシストを用いた自動運転支援の有効性検証"}
