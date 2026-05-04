@@ -1,0 +1,6 @@
+# NOTE: 動作未検証。学内サーバー移行時の参考構成です。
+# docker-compose.yml をベースに作成しています。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lab-rag
