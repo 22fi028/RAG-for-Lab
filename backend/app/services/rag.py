@@ -1,16 +1,31 @@
-# [ROLE] BM25向けクエリ拡張・ハイブリッド検索（BM25 + ベクトル + RRF統合）・プロンプト組み立て・OllamaへのLLMストリーミング呼び出し
+# [ROLE] BM25向けクエリ拡張・ハイブリッド検索（BM25 + ベクトル + RRF統合）・プロンプト組み立て・OllamaへのLLMストリーミング呼び出し・チャンク/根拠の共通型(ChunkResult/SourceItem)定義
 # [DEPS] core/config.py, services/embedder.py
 # [CALLED_BY] routers/chat.py, routers/documents.py（invalidate_bm25_cacheのみ）, scripts/eval_recall.py
 
 import asyncio
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, TypedDict
 
 import chromadb
 import httpx
 from rank_bm25 import BM25Okapi
 
 from app.core.config import settings
+
+
+class ChunkResult(TypedDict):
+    """検索系関数（search_chroma / search_bm25 / hybrid_search）が返すチャンクの共通型。
+    metadata は内部キー（title / chapter / page_num / doc_id 等）が任意のため dict のまま。"""
+    content: str
+    score: float
+    metadata: dict
+
+
+class SourceItem(TypedDict):
+    """フロント側の Source と一致する根拠表示用の構造（build_sources_from_chunks の出力）。"""
+    title: str
+    chapter: str
+    page: int
 
 
 SYSTEM_PROMPT = (
@@ -76,7 +91,7 @@ async def expand_query_for_bm25(query: str) -> str:
         return query
 
 
-async def search_chroma(query_embedding: list[float]) -> list[dict]:
+async def search_chroma(query_embedding: list[float]) -> list[ChunkResult]:
     """
     ChromaDB を Top-K で検索し similarity_threshold 以上のチャンクを返す。
     最大2回リトライ（指数バックオフ）。全失敗時は空リストで LLM 続行。
@@ -91,7 +106,7 @@ async def search_chroma(query_embedding: list[float]) -> list[dict]:
                 n_results=settings.rag_top_k,
                 include=["documents", "metadatas", "distances"],
             )
-            chunks: list[dict] = []
+            chunks: list[ChunkResult] = []
             documents = results.get("documents") or [[]]
             metadatas = results.get("metadatas") or [[]]
             distances = results.get("distances") or [[]]
@@ -183,11 +198,12 @@ def invalidate_bm25_cache() -> None:
     print("[bm25] cache invalidated")
 
 
-def search_bm25(query: str, top_k: int) -> list[dict]:
+def search_bm25(query: str, top_k: int) -> list[ChunkResult]:
     """
     BM25でクエリに対する上位 top_k 件を返す。
     インデックスが未構築なら build_bm25_index() を呼ぶ。
-    戻り値: [{"content": str, "score": float, "metadata": dict, "rank": int}, ...]
+    戻り値の dict には ChunkResult のキーに加えてデバッグ用の "rank" キーを含む
+    （ChunkResult は最低限のスキーマで、追加キーは runtime では許容される）。
     """
     if _bm25_index is None:
         build_bm25_index()
@@ -201,7 +217,7 @@ def search_bm25(query: str, top_k: int) -> list[dict]:
     scores = _bm25_index.get_scores(tokens)
     indexed = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:top_k]
 
-    results: list[dict] = []
+    results: list[ChunkResult] = []
     for rank, (idx, score) in enumerate(indexed, start=1):
         if score <= 0:
             continue
@@ -216,11 +232,11 @@ def search_bm25(query: str, top_k: int) -> list[dict]:
 
 
 def reciprocal_rank_fusion(
-    vector_results: list[dict],
-    bm25_results: list[dict],
+    vector_results: list[ChunkResult],
+    bm25_results: list[ChunkResult],
     k: int = 60,
     top_k: int | None = None,
-) -> list[dict]:
+) -> list[ChunkResult]:
     """
     RRFでベクトル検索とBM25の結果を統合する。
     各リストの順位 r から RRF スコア 1 / (k + r) を計算し、両リストのスコアを加算する。
@@ -230,11 +246,11 @@ def reciprocal_rank_fusion(
         top_k = settings.rag_top_k
 
     rrf_scores: dict[tuple, float] = {}
-    chunk_data: dict[tuple, dict] = {}
+    chunk_data: dict[tuple, ChunkResult] = {}
 
-    def _key(chunk: dict) -> tuple:
-        meta = chunk.get("metadata") or {}
-        return (meta.get("doc_id", ""), chunk.get("content", ""))
+    def _key(chunk: ChunkResult) -> tuple:
+        meta = chunk["metadata"]
+        return (meta.get("doc_id", ""), chunk["content"])
 
     for rank, chunk in enumerate(vector_results, start=1):
         key = _key(chunk)
@@ -255,7 +271,7 @@ async def hybrid_search_with_components(
     query: str,
     query_embedding: list[float],
     expand_bm25: bool = True,
-) -> tuple[list[dict], list[dict], list[dict]]:
+) -> tuple[list[ChunkResult], list[ChunkResult], list[ChunkResult]]:
     """
     ベクトル検索・BM25検索・RRF統合結果の3つを返すデバッグ/評価用エントリ。
     戻り値: (vector_results, bm25_results, fused_results)
@@ -272,7 +288,7 @@ async def hybrid_search(
     query: str,
     query_embedding: list[float],
     expand_bm25: bool = True,
-) -> list[dict]:
+) -> list[ChunkResult]:
     """
     ベクトル検索（ChromaDB）とBM25検索を実行し RRF で統合する。
     expand_bm25=True のとき BM25 クエリのみ LLM 拡張する（ベクトル側は元の query を維持）。
@@ -281,13 +297,13 @@ async def hybrid_search(
     return fused
 
 
-def build_context_blocks(chunks: list[dict]) -> str:
+def build_context_blocks(chunks: list[ChunkResult]) -> str:
     """検索チャンクをプロンプト用 context_blocks 形式に整形する。"""
     if not chunks:
         return "(コンテキストなし)"
     lines: list[str] = []
     for i, chunk in enumerate(chunks, start=1):
-        meta = chunk.get("metadata") or {}
+        meta = chunk["metadata"]
         title = meta.get("title", "") or "(タイトル不明)"
         chapter = meta.get("chapter", "") or "-"
         page = meta.get("page_num", 0) or 0
@@ -312,7 +328,7 @@ def build_history_text(history: list[dict]) -> str:
     return "\n".join(lines) if lines else "(履歴なし)"
 
 
-def build_prompt(question: str, chunks: list[dict], history: list[dict]) -> str:
+def build_prompt(question: str, chunks: list[ChunkResult], history: list[dict]) -> str:
     """Ollama に渡す最終プロンプトを組み立てる。"""
     context_blocks = build_context_blocks(chunks)
     history_text = build_history_text(history)
@@ -324,12 +340,12 @@ def build_prompt(question: str, chunks: list[dict], history: list[dict]) -> str:
     )
 
 
-def build_sources_from_chunks(chunks: list[dict]) -> list[dict]:
+def build_sources_from_chunks(chunks: list[ChunkResult]) -> list[SourceItem]:
     """ChromaDB 検索結果メタデータから根拠リストを生成する（重複除去）。"""
-    sources: list[dict] = []
+    sources: list[SourceItem] = []
     seen: set = set()
     for chunk in chunks:
-        meta = chunk.get("metadata") or {}
+        meta = chunk["metadata"]
         title = meta.get("title", "") or ""
         chapter = meta.get("chapter", "") or ""
         page = meta.get("page_num", 0) or 0

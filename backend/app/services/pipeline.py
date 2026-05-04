@@ -39,9 +39,11 @@ OCR_ROW_GAP_THRESHOLD = 15  # これ以上yminが離れたら別行とみなす
 
 def sort_blocks(blocks: list[dict]) -> list[dict]:
     """
-    OCRブロックを読み順（上→下・左→右）にソートする。
+    OCRブロックを読み順（上→下・左→右）にソートし、_row_id を付与して返す。
     隣接ブロック間のymin差がOCR_ROW_GAP_THRESHOLD以上なら別行と判定する。
     同一行内はxminの昇順でソートする。
+    呼び出し元は _row_id を使って同一行をスペース結合すること。
+    使用後は呼び出し元責任で _row_id を pop してクリーンアップすること。
     """
     if not blocks:
         return blocks
@@ -59,14 +61,8 @@ def sort_blocks(blocks: list[dict]) -> list[dict]:
         block["_row_id"] = row_id
         prev_ymin = ymin
 
-    # (行ID, xmin) でソート
-    result = sorted(sorted_by_y, key=lambda b: (b["_row_id"], b["bbox"][0]))
-
-    # 一時キーを削除
-    for block in result:
-        block.pop("_row_id", None)
-
-    return result
+    # (行ID, xmin) でソートして返す（_row_id は呼び出し元のグルーピング用に保持）
+    return sorted(sorted_by_y, key=lambda b: (b["_row_id"], b["bbox"][0]))
 
 
 _ocr = None
@@ -242,22 +238,13 @@ def to_markdown_ocr(ocr_result: dict) -> str:
     OCR 抽出結果を Markdown 化。インデックス化対象は信頼度 >= 閾値のブロックのみ。
     （低信頼度ブロックは ocr_results テーブルには残すが索引対象からは外す）
     """
+    from itertools import groupby
+
     threshold = settings.ocr_confidence_threshold
     blocks = [b for b in ocr_result["blocks"] if b["confidence"] >= threshold]
-    blocks = sort_blocks(blocks)
+    blocks = sort_blocks(blocks)  # _row_id 付きで返る
 
-    # 差分クラスタリングで行グループを割り当て
-    row_id = 0
-    prev_ymin = blocks[0]["bbox"][1] if blocks else 0
-    for block in blocks:
-        ymin = block["bbox"][1]
-        if ymin - prev_ymin > OCR_ROW_GAP_THRESHOLD:
-            row_id += 1
-        block["_row_id"] = row_id
-        prev_ymin = ymin
-
-    # 同一行はスペース結合・行間は改行
-    from itertools import groupby
+    # 同一行 (_row_id) ごとにスペース結合・行間は改行
     lines = []
     for _, group in groupby(blocks, key=lambda b: b["_row_id"]):
         line = " ".join(b.get("text", "") for b in group)

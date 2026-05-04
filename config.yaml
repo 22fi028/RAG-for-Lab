@@ -14,6 +14,7 @@ rag:
   top_k: 5
   similarity_threshold: 0.5
   history_window: 5
+  excerpt_max_length: 200      # DocPanel に表示する根拠チャンク抜粋の最大文字数
 
 chunking:
   chunk_size: 512
