@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, "/app")
 
 from app.services.embedder import embed_query
-from app.services.rag import expand_query, hybrid_search
+from app.services.rag import hybrid_search_with_components
 
 
 EVAL_SET_PATH = Path(__file__).parent / "eval_set.jsonl"
@@ -48,9 +48,22 @@ def chunk_contains_all_keywords(chunk_text: str, keywords: list[str]) -> bool:
     return all(_strip_spaces(kw) in normalized_chunk for kw in keywords)
 
 
-async def _retrieve(query: str) -> list[dict]:
+async def _retrieve_components(query: str, expand_bm25: bool) -> tuple[list[dict], list[dict], list[dict]]:
     embedding = embed_query(query)
-    return await hybrid_search(query, embedding)
+    return await hybrid_search_with_components(query, embedding, expand_bm25=expand_bm25)
+
+
+def _print_top5(label: str, chunks: list[dict], score_label: str, keywords: list[str]) -> None:
+    """ラベル付きで Top-5 を表示し、各チャンクが expected_keywords を満たすかを併記する。"""
+    print(f"[eval]   {label} Top-5:")
+    if not chunks:
+        print("[eval]     (no results)")
+        return
+    for i, c in enumerate(chunks[:TOP_K], start=1):
+        doc = c.get("content", "")
+        sc = c.get("score", 0.0)
+        mark = "*HIT*" if chunk_contains_all_keywords(doc, keywords) else "     "
+        print(f'[eval]     {mark} #{i} {score_label}={sc:.4f}: "{excerpt(doc, DEBUG_EXCERPT_LEN)}"')
 
 
 def evaluate(items: list[dict], debug: bool = False, expand: bool = False) -> tuple[int, int]:
@@ -64,17 +77,16 @@ def evaluate(items: list[dict], debug: bool = False, expand: bool = False) -> tu
 
         print(f"[eval] Q: {question}")
 
-        query = question
-        if expand:
-            query = asyncio.run(expand_query(query))
-            print(f"[eval]   expanded: {query}")
-
-        chunks = asyncio.run(_retrieve(query))
-        documents = [c.get("content", "") for c in chunks][:TOP_K]
-        scores = [c.get("score", 0.0) for c in chunks][:TOP_K]
+        vector_results, bm25_results, fused = asyncio.run(_retrieve_components(question, expand_bm25=expand))
+        documents = [c.get("content", "") for c in fused][:TOP_K]
+        scores = [c.get("score", 0.0) for c in fused][:TOP_K]
 
         if not documents:
             print("[eval]   → MISS (no results)")
+            if debug:
+                print(f"[eval]   expected_keywords: {keywords}")
+                _print_top5("BM25", bm25_results, "score", keywords)
+                _print_top5("Vector", vector_results, "score", keywords)
             continue
 
         hit_index = -1
@@ -89,9 +101,10 @@ def evaluate(items: list[dict], debug: bool = False, expand: bool = False) -> tu
         else:
             print(f'[eval]   → MISS (top chunk: "{excerpt(documents[0])}") rrf_score={scores[0]:.4f}')
             if debug:
-                print("[eval]   Top-5 chunks:")
-                for i, (doc, sc) in enumerate(zip(documents, scores), start=1):
-                    print(f'[eval]     #{i} rrf_score={sc:.4f}: "{excerpt(doc, DEBUG_EXCERPT_LEN)}"')
+                print(f"[eval]   expected_keywords: {keywords}")
+                _print_top5("BM25", bm25_results, "score", keywords)
+                _print_top5("Vector", vector_results, "score", keywords)
+                _print_top5("RRF", fused, "rrf_score", keywords)
 
     return hits, total
 
@@ -106,7 +119,7 @@ def main() -> None:
     parser.add_argument(
         "--expand",
         action="store_true",
-        help="Enable query expansion via Ollama",
+        help="Enable BM25-only query expansion via Ollama (vector query stays original)",
     )
     args = parser.parse_args()
 

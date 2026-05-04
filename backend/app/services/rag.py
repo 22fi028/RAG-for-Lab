@@ -251,6 +251,23 @@ def reciprocal_rank_fusion(
     return [chunk_data[k_] for k_ in sorted_keys[:top_k]]
 
 
+async def hybrid_search_with_components(
+    query: str,
+    query_embedding: list[float],
+    expand_bm25: bool = True,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """
+    ベクトル検索・BM25検索・RRF統合結果の3つを返すデバッグ/評価用エントリ。
+    戻り値: (vector_results, bm25_results, fused_results)
+    eval_recall.py の --debug などで「BM25単体」「Vector単体」を比較したい場合に使う。
+    """
+    vector_results = await search_chroma(query_embedding)
+    bm25_query = await expand_query_for_bm25(query) if expand_bm25 else query
+    bm25_results = search_bm25(bm25_query, top_k=settings.rag_top_k * 2)
+    fused = reciprocal_rank_fusion(vector_results, bm25_results)
+    return vector_results, bm25_results, fused
+
+
 async def hybrid_search(
     query: str,
     query_embedding: list[float],
@@ -260,10 +277,8 @@ async def hybrid_search(
     ベクトル検索（ChromaDB）とBM25検索を実行し RRF で統合する。
     expand_bm25=True のとき BM25 クエリのみ LLM 拡張する（ベクトル側は元の query を維持）。
     """
-    vector_results = await search_chroma(query_embedding)
-    bm25_query = await expand_query_for_bm25(query) if expand_bm25 else query
-    bm25_results = search_bm25(bm25_query, top_k=settings.rag_top_k * 2)
-    return reciprocal_rank_fusion(vector_results, bm25_results)
+    _, _, fused = await hybrid_search_with_components(query, query_embedding, expand_bm25)
+    return fused
 
 
 def build_context_blocks(chunks: list[dict]) -> str:
