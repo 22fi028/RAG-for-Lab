@@ -23,3 +23,6 @@ Thumbs.db
 
 # Build artifacts
 frontend/tsconfig.tsbuildinfo
+
+# Container-generated artifacts (host側 docs/images にコピーする)
+backend/docs/
