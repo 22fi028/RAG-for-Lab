@@ -15,6 +15,8 @@ rag:
   similarity_threshold: 0.5
   history_window: 5
   excerpt_max_length: 200      # DocPanel に表示する根拠チャンク抜粋の最大文字数
+  rrf_k: 60                    # Reciprocal Rank Fusion の k パラメータ
+  bm25_top_k_multiplier: 2     # BM25 検索時の top_k 倍率（rag.top_k × この値）
 
 chunking:
   chunk_size: 512

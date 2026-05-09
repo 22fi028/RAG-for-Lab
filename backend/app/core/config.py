@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     rag_similarity_threshold: float = _yaml.get("rag", {}).get("similarity_threshold", 0.5)
     rag_history_window: int = _yaml.get("rag", {}).get("history_window", 5)
     rag_excerpt_max_length: int = _yaml.get("rag", {}).get("excerpt_max_length", 200)
+    rag_rrf_k: int = _yaml.get("rag", {}).get("rrf_k", 60)
+    rag_bm25_top_k_multiplier: int = _yaml.get("rag", {}).get("bm25_top_k_multiplier", 2)
     rag_max_tokens: int = _yaml.get("llm", {}).get("max_tokens", 1024)
     rag_temperature: float = _yaml.get("llm", {}).get("temperature", 0.1)
     embedding_model: str = _yaml.get("embedding", {}).get("model", "intfloat/multilingual-e5-large")
