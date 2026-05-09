@@ -234,7 +234,7 @@ def search_bm25(query: str, top_k: int) -> list[ChunkResult]:
 def reciprocal_rank_fusion(
     vector_results: list[ChunkResult],
     bm25_results: list[ChunkResult],
-    k: int = 60,
+    k: int | None = None,
     top_k: int | None = None,
 ) -> list[ChunkResult]:
     """
@@ -242,6 +242,8 @@ def reciprocal_rank_fusion(
     各リストの順位 r から RRF スコア 1 / (k + r) を計算し、両リストのスコアを加算する。
     重複排除は (doc_id, content) をキーに行う。
     """
+    if k is None:
+        k = settings.rag_rrf_k
     if top_k is None:
         top_k = settings.rag_top_k
 
@@ -279,8 +281,8 @@ async def hybrid_search_with_components(
     """
     vector_results = await search_chroma(query_embedding)
     bm25_query = await expand_query_for_bm25(query) if expand_bm25 else query
-    bm25_results = search_bm25(bm25_query, top_k=settings.rag_top_k * 2)
-    fused = reciprocal_rank_fusion(vector_results, bm25_results)
+    bm25_results = search_bm25(bm25_query, top_k=settings.rag_top_k * settings.rag_bm25_top_k_multiplier)
+    fused = reciprocal_rank_fusion(vector_results, bm25_results, k=settings.rag_rrf_k)
     return vector_results, bm25_results, fused
 
 
