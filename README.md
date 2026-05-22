@@ -1,5 +1,12 @@
 # RAG-for-Lab
 
+![Python](https://img.shields.io/badge/Python-3.10+-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green)
+![Next.js](https://img.shields.io/badge/Next.js-14-black)
+![Docker](https://img.shields.io/badge/Docker-Compose-blue)
+![Recall@5](https://img.shields.io/badge/Recall%405-0.92-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
 > 研究室の過去知見（論文PDF・スライド・Word・紙の冊子）を自然言語で検索できる、
 > ローカル完結・ゼロランニングコストの RAG システム。
 
