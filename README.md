@@ -186,6 +186,81 @@ RAG-for-Lab/
 └── docker-compose.yml
 ```
 
+---
+
+## 設計上の意思決定
+
+### 根拠をLLMに生成させない
+回答の根拠（文書名・章・ページ番号）はChromaDBの検索結果メタデータから
+システムが直接生成する。LLMに生成させるとハルシネーション（存在しない
+文書名の捏造）が発生するため採用しなかった。
+
+**却下した方式：** プロンプトに「参照した文書名を末尾に列挙してください」と指示
+→ 実在しない文書名・ページ番号を堂々と生成することを確認したため不採用。
+
+---
+
+### BM25のchar N-gramトークナイザ
+日本語はスペース区切りでは複合語が分割されない。
+whitespace splitから2-gram + 3-gramのchar N-gramに変更することで
+「96kHz」「EasyMocap」のような固有名詞・数値の検索精度を改善した。
+
+```python
+# whitespace split（変更前）：「96kHz」→ ["96kHz"]（単語境界なし）
+# char N-gram（変更後）：「96kHz」→ ["96", "6k", "kH", "Hz", "96k", "6kH", "kHz"]
+```
+
+---
+
+### config.yaml → .envの2層設定管理
+ハイパーパラメータ（RAGパラメータ・モデル名）はconfig.yamlで管理し、
+DB接続・パスなど環境固有値は.envで管理。.envの同名変数がconfig.yamlを
+上書きする構造。コンテナ再起動なしでパラメータ変更が反映される。
+すべてのパラメータはsettings.*経由で参照し、ハードコード禁止。
+
+```yaml
+# config.yaml（ハイパーパラメータ）
+retrieval:
+  top_k: 5
+  similarity_threshold: 0.5
+  bm25_weight: 0.4
+  vector_weight: 0.6
+```
+
+```bash
+# .env（環境固有値・config.yamlを上書き）
+SIMILARITY_THRESHOLD=0.3  # 本番環境では閾値を下げる場合
+```
+
+---
+
+### 非同期インデックス化
+アップロード後すぐ202 Acceptedを返し、BackgroundTasksで非同期実行。
+フロントエンドが3秒ポーリングでステータス（pending→indexing→indexed/error）
+を取得して表示更新。ユーザーが待機せずに他の操作を継続できる。
+POST /documents/upload
+→ 202 Accepted（即時返却）
+→ BackgroundTasks: pipeline.run()
+→ GET /documents/{id}/status（3秒ポーリング）
+→ { "status": "indexed" }
+
+---
+
+### 埋め込みと検索でプレフィックスを使い分ける
+multilingual-e5-largeの仕様に従い、格納時は `"passage: "`、
+検索時は `"query: "` プレフィックスを付与。
+混同するとベクトル空間がずれて精度が落ちる。
+
+```python
+# 格納時
+embedding = model.encode("passage: " + chunk_text)
+
+# 検索時
+query_embedding = model.encode("query: " + user_query)
+```
+
+---
+
 ## 評価と改善
 
 ### Recall@5 の推移
