@@ -101,6 +101,69 @@ graph LR
 
 ## セットアップ
 
+### 動作要件
+
+| 項目 | 最小要件 | 推奨 |
+|------|---------|------|
+| GPU VRAM | 8GB以上 | 8GB（RTX 3070で動作確認済み） |
+| RAM | 16GB以上 | 32GB |
+| ストレージ | 20GB以上の空き | SSD推奨 |
+| OS | Windows 11 / Ubuntu 22.04 | — |
+
+> ⚠️ VRAM 8GB未満の環境ではQwen3-8B (Q4_K_M) が起動しません。
+> CPUのみの環境では推論速度が大幅に低下します（1トークン/秒以下）。
+
+---
+
+### 初回起動の注意
+
+初回起動時は以下のダウンロードが発生します（合計約6GB）。
+
+| モデル | サイズ | ダウンロード先 |
+|--------|--------|--------------|
+| Qwen3-8B (Q4_K_M) | 約5.5GB | Ollama（`ollama pull qwen3:8b`） |
+| multilingual-e5-large | 約0.6GB | HuggingFace（初回起動時に自動） |
+
+ダウンロード完了まで環境により5〜15分かかります。
+`backend` コンテナのログで進捗を確認できます。
+
+```bash
+docker compose logs -f backend
+```
+
+---
+
+### 環境変数
+
+`.env.example` をコピーしてそのまま動作します。
+変更が必要な場合は以下を参考に編集してください。
+
+| 変数名 | デフォルト値 | 説明 |
+|--------|------------|------|
+| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | OllamaのエンドポイントURL |
+| `SIMILARITY_THRESHOLD` | `0.5` | 検索スコアの足切り閾値（0〜1） |
+| `TOP_K` | `5` | 検索結果の上位件数 |
+| `DATABASE_URL` | `postgresql://...` | PostgreSQL接続文字列 |
+
+---
+
+### 評価の再現
+
+付属の評価セット（`scripts/eval_set.jsonl`・12件）でRecall@5を再現できます。
+
+```bash
+# Recall@5 計測（期待値: 0.92 = 11/12）
+docker compose exec backend python scripts/eval_recall.py
+
+# MISSした質問のTop-5チャンクを確認
+docker compose exec backend python scripts/eval_recall.py --debug
+
+# ChromaDB内のキーワード存在確認
+docker compose exec backend python scripts/check_index.py --keyword "96kHz"
+```
+
+---
+
 ### 前提
 
 - Docker Desktop（Windows/Mac）または Docker Engine（Linux）
